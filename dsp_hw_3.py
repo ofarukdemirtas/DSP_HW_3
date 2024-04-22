@@ -1,6 +1,8 @@
-import sounddevice as sd
 import numpy as np
+import sounddevice as sd
+import soundfile as sf
 from scipy.signal import butter, lfilter
+import threading
 
 # Define the sampling rate
 fs = 44100  # 44.1 kHz sampling rate
@@ -32,18 +34,36 @@ left_filtered_signal = np.zeros(0)
 right_filtered_signal = np.zeros(0)
 
 # Callback function to process the audio in real-time
-def callback(indata, outdata, frames, time, status):
+def audio_callback(indata, outdata, frames, time, status):
     if status:
         print('Error:', status)
-    # Apply the filters to the input audio
-    left_filtered = lfilter(lowpass_b, lowpass_a, indata[:, 0])  # Apply low-pass filter to left channel
-    right_filtered = lfilter(bandpass_b, bandpass_a, indata[:, 0])  # Apply band-pass filter to right channel
+    
+    left_channel = indata[:, 0]
+    right_channel = indata[:, 1]
+    
+    # Apply the filters in parallel using threading
+    left_thread = threading.Thread(target=apply_filter, args=(left_channel, lowpass_b, lowpass_a, 0))
+    right_thread = threading.Thread(target=apply_filter, args=(right_channel, bandpass_b, bandpass_a, 1))
+    
+    left_thread.start()
+    right_thread.start()
+    
+    left_thread.join()
+    right_thread.join()
+    
     # Play the filtered audio
-    outdata[:, 0] = left_filtered  # Left channel is the low-pass filtered signal
-    outdata[:, 1] = right_filtered  # Right channel is the band-pass filtered signal
+    outdata[:, 0] = left_filtered_signal
+    outdata[:, 1] = right_filtered_signal
+
+def apply_filter(channel, b, a, index):
+    global left_filtered_signal, right_filtered_signal
+    filtered_signal = lfilter(b, a, channel)
+    if index == 0:
+        left_filtered_signal = filtered_signal
+    else:
+        right_filtered_signal = filtered_signal
 
 # Start streaming audio with the filters applied
-with sd.Stream(callback=callback, blocksize=1024, channels=2, samplerate=fs):
+with sd.Stream(callback=audio_callback, blocksize=1024, channels=2, samplerate=fs):
     print('Filters applied. Press Ctrl+C to stop.')
-    while True:
-        sd.sleep(100)  # Sleep for a short duration to allow the stream to continue running
+    sd.sleep(100000)  # Sleep for a longer duration to allow the stream to continue running
